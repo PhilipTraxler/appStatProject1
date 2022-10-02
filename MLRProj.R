@@ -272,6 +272,84 @@ plot(testModel)
 
 
 
+####BORUTA FUNCTION
+
+boruta.train <- Boruta(MSRP~combMPG+cylinders+horsepower+Year+doors+Make+fuelType+transmission+
+                     drive+category+horsepower:category+Year:yearCat+yearCat+combMPG:fuelType,
+                     data=trainT, doTrace = 2)
+                     
+                  
+print(boruta.train)
+
+plot(boruta.trainT, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(boruta.train$ImpHistory),function(i)
+boruta.train$ImpHistory[is.finite(boruta.train$ImpHistory[,i]),i])
+names(lz) <- colnames(boruta.train$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+at = 1:ncol(boruta.train$ImpHistory), cex.axis = 0.7)
+final.boruta <- TentativeRoughFix(boruta.train)
+print(final.boruta)
+
+
+
+######Ranger Forest Regression
+
+library(ranger)
+
+net = seq(1,500,5)
+
+
+OOB = vector("numeric", length(net))
+rs = vector("numeric", length(net))
+ntree = vector("numeric", length(net))
+
+for (i in 1:length(net)){
+rf = ranger(exp(MSRP) ~., trainT, num.trees = net[i],mtry = 4, importance = 'impurity', write.forest = TRUE)
+OOB[i] = rf$prediction.error
+rs[i] = rf$r.squared
+ntree[i] = rf$num.trees
+
+
+}
+alldata = data.frame(cbind(OOB,rs,ntree))
+colnames(alldata) = c("OutofBag", "RSquared", "NumberofTrees")
+
+
+datatorun = alldata[which.min(alldata$OutofBag),]
+
+
+rerun = ranger(exp(MSRP)~., trainT, num.trees = datatorun$NumberofTrees, importance = 'impurity', write.forest = TRUE)
+
+
+# Creating Gini Score Data Frame
+GiniScores = data.frame(GiniScore = c(rerun$variable.importance),"Variable" = c(t(colnames(subset(trainT,select = -c(MSRP))))))
+
+
+##Creating Indexed Gini Scores
+GiniScores$med = median(GiniScores$GiniScore)
+GiniScores$Index = GiniScores$GiniScore / GiniScores$med
+
+### Final Predictors
+
+Predictors = (GiniScores %>% filter(Index >=1)) %>% select(Variable)
+Predictors2 = t(Predictors)
+slimmeddata = cbind(data.frame(trainT[,colnames(trainT) %in% c(Predictors2)]),data.frame("MSRP" =trainT$MSRP))
+
+
+###Final MLR
+
+complexModel2 = lm(exp(MSRP)~.,data=slimmeddata)
+summary(complexModel2)
+AIC(complexModel2)
+
+
+val = valT[,colnames(trainT) %in% c(Predictors2)]
+test = testT[,colnames(trainT) %in% c(Predictors2)]
+test = rbind(test,val)
+
+predictions_final = predict(complexModel2,newdata=test)
+fitControl<-trainControl(method="repeatedcv",number=5,repeats=1) 
 
 
 
